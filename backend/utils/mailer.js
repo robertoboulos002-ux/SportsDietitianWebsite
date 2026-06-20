@@ -66,6 +66,7 @@ async function sendAdminBookingEmail(booking) {
   await transporter.sendMail({
     from: `"Booking system" <${process.env.GMAIL_USER}>`,
     to: notifyAddress,
+    replyTo: `"${booking.name}" <${booking.email}>`,
     subject: `New booking: ${typeLabel} - ${booking.preferredDate} ${booking.preferredTime}`,
     text: lines.join('\n')
   })

@@ -4,11 +4,7 @@ import TickDivider from '../components/TickDivider.jsx'
 
 const APPOINTMENT_TYPES = [
   { value: 'consultation', label: 'Nutrition Consultation', duration: '50 min', price: '$120' },
-  { value: 'body-composition', label: 'Body Composition Test', duration: '30 min', price: '$75' }
-]
-
-const ALL_TIME_SLOTS = [
-  '09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00', '17:00'
+  { value: 'body-composition', label: 'Body Composition Test', duration: '15 min', price: '$75' }
 ]
 
 const todayISO = new Date().toISOString().split('T')[0]
@@ -33,41 +29,40 @@ export default function Booking() {
   const [status, setStatus] = useState('idle') // idle | loading | success | error
   const [serverMessage, setServerMessage] = useState('')
 
-  const [bookedTimes, setBookedTimes] = useState([])
+  const [availableSlots, setAvailableSlots] = useState([])
   const [slotsLoading, setSlotsLoading] = useState(false)
-  const availableSlots = ALL_TIME_SLOTS.filter((t) => !bookedTimes.includes(t))
 
-  // Whenever the chosen date changes, ask the backend which times are
-  // already taken on that date so we can hide them instead of letting
-  // someone pick a slot that's already gone.
+  // Whenever the chosen date OR appointment type changes, ask the backend
+  // which start times are actually open — duration-aware, so a 50-minute
+  // consultation and a 15-minute body composition test see different
+  // available times even on the same date.
   useEffect(() => {
     if (!form.preferredDate) {
-      setBookedTimes([])
+      setAvailableSlots([])
       return
     }
 
     let cancelled = false
     setSlotsLoading(true)
 
-    fetch(`/api/availability?date=${form.preferredDate}`)
+    fetch(`/api/availability?date=${form.preferredDate}&type=${form.appointmentType}`)
       .then((res) => res.json())
       .then((data) => {
         if (cancelled) return
-        setBookedTimes(data.bookedTimes || [])
-        // If the previously selected time just became unavailable, clear it.
-        setForm((f) =>
-          data.bookedTimes?.includes(f.preferredTime) ? { ...f, preferredTime: '' } : f
-        )
+        const times = data.availableTimes || []
+        setAvailableSlots(times)
+        // If the previously selected time is no longer open, clear it.
+        setForm((f) => (times.includes(f.preferredTime) ? f : { ...f, preferredTime: '' }))
       })
       .catch(() => {
-        if (!cancelled) setBookedTimes([])
+        if (!cancelled) setAvailableSlots([])
       })
       .finally(() => {
         if (!cancelled) setSlotsLoading(false)
       })
 
     return () => { cancelled = true }
-  }, [form.preferredDate])
+  }, [form.preferredDate, form.appointmentType])
 
   function update(field, value) {
     const nextValue = field === 'phone' ? value.replace(/\D/g, '') : value
@@ -104,9 +99,9 @@ export default function Booking() {
       const data = await res.json()
 
       if (res.status === 409) {
-        // Someone else took the slot between page load and submit — refresh
-        // the available times so the dropdown reflects reality.
-        setBookedTimes((prev) => [...prev, form.preferredTime])
+        // Someone else took the slot between page load and submit — drop it
+        // from the local list so the dropdown reflects reality.
+        setAvailableSlots((prev) => prev.filter((t) => t !== form.preferredTime))
         setForm((f) => ({ ...f, preferredTime: '' }))
         throw new Error(data.error || 'That slot was just taken. Please pick another time.')
       }
@@ -285,7 +280,7 @@ export default function Booking() {
             disabled={status === 'loading'}
             className="font-display font-semibold uppercase text-sm tracking-wide bg-ink text-chalk px-7 py-3.5 hover:bg-ember transition-colors disabled:opacity-60"
           >
-            {status === 'loading' ? 'Submitting…' : 'Request this slot'}
+            {status === 'loading' ? 'Submitting…' : 'Submit Booking Request'}
           </button>
         </form>
       </section>

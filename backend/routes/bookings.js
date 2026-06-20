@@ -1,6 +1,8 @@
 const express = require('express')
 const pool = require('../db/pool')
 const { sendBookingNotification, sendClientStatusEmail } = require('../utils/mailer')
+const { getDuration, fitsWithinWindows, rangesOverlap } = require('../utils/scheduling')
+const requireAdmin = require('../middleware/requireAdmin')
 
 const router = express.Router()
 
@@ -11,20 +13,6 @@ const PHONE_RE = /^\d+$/
 const APPOINTMENT_PRICES = {
   consultation: process.env.PRICE_CONSULTATION || '$120',
   'body-composition': process.env.PRICE_BODY_COMPOSITION || '$75'
-}
-
-function requireAdmin(req, res, next) {
-  const configuredPassword = process.env.ADMIN_PASSWORD
-  const submittedPassword = req.get('x-admin-password')
-
-  if (!configuredPassword) {
-    return res.status(503).json({ error: 'Admin dashboard is not configured. Set ADMIN_PASSWORD in .env.' })
-  }
-  if (submittedPassword !== configuredPassword) {
-    return res.status(401).json({ error: 'Invalid admin password.' })
-  }
-
-  next()
 }
 
 // POST /api/bookings — create a new booking request
@@ -45,18 +33,45 @@ router.post('/', async (req, res) => {
   }
 
   try {
-    // Check for an existing active booking at this exact date + time before
-    // inserting. The database's unique index (see schema.sql) is the real
-    // safety net against race conditions — this check is what lets us give
-    // the user a friendly message instead of a generic database error.
-    const [conflicts] = await pool.execute(
-      `SELECT id FROM bookings
-       WHERE preferred_date = ? AND preferred_time = ? AND status != 'cancelled'
-       LIMIT 1`,
-      [preferredDate, preferredTime]
+    // The admin's configured availability for this date — if they haven't
+    // set any windows, nothing on this date is bookable.
+    const [windowRows] = await pool.execute(
+      `SELECT start_time, end_time FROM availability_windows WHERE date = ?`,
+      [preferredDate]
     )
-    if (conflicts.length > 0) {
-      return res.status(409).json({ error: 'That slot was just taken. Please pick another time.' })
+    const windows = windowRows.map((w) => ({
+      startTime: String(w.start_time).slice(0, 5),
+      endTime: String(w.end_time).slice(0, 5)
+    }))
+    const requestedDuration = getDuration(appointmentType)
+
+    if (!fitsWithinWindows(preferredTime, requestedDuration, windows)) {
+      return res.status(400).json({
+        error: 'That time is outside the available hours for this date.',
+        fields: { preferredTime: 'Outside available hours for this date.' }
+      })
+    }
+
+    // Check for any existing active booking that day whose time range
+    // overlaps the requested one — not just an exact-time match. A 50-min
+    // consultation at 10:00 occupies 10:00-10:50, so a 15-min body
+    // composition test at 10:15 must be rejected even though the times
+    // don't literally match. The database's unique index (see schema.sql)
+    // is a secondary safety net against exact-time race conditions; this
+    // check is what catches duration-based overlaps and gives a friendly
+    // message instead of a generic database error.
+    const [sameDayBookings] = await pool.execute(
+      `SELECT preferred_time, appointment_type FROM bookings
+       WHERE preferred_date = ? AND status != 'cancelled'`,
+      [preferredDate]
+    )
+    const hasOverlap = sameDayBookings.some((existing) => {
+      const existingDuration = getDuration(existing.appointment_type)
+      const existingTime = String(existing.preferred_time).slice(0, 5)
+      return rangesOverlap(preferredTime, requestedDuration, existingTime, existingDuration)
+    })
+    if (hasOverlap) {
+      return res.status(409).json({ error: 'That slot overlaps another booking. Please pick another time.' })
     }
 
     const [result] = await pool.execute(

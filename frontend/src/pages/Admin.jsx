@@ -11,6 +11,11 @@ const TYPE_PRICES = {
   consultation: '$120',
   'body-composition': '$75'
 }
+// Date#getDay() convention: 0=Sunday...6=Saturday. Displayed Monday-first.
+const DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0]
+const emptyPattern = () => Object.fromEntries(DAY_ORDER.map((d) => [d, []]))
+const emptyDrafts = () => Object.fromEntries(DAY_ORDER.map((d) => [d, { start: '', end: '' }]))
 
 export default function Admin() {
   const [password, setPassword] = useState(() => sessionStorage.getItem(ADMIN_PASSWORD_KEY) || '')
@@ -20,6 +25,13 @@ export default function Admin() {
   const [loadState, setLoadState] = useState('idle')
   const [message, setMessage] = useState('')
 
+  const [weeklyPattern, setWeeklyPattern] = useState(emptyPattern)
+  const [dayDraft, setDayDraft] = useState(emptyDrafts)
+  const [weeksAhead, setWeeksAhead] = useState(8)
+  const [generateState, setGenerateState] = useState('idle') // idle | loading | done | error
+  const [generateMessage, setGenerateMessage] = useState('')
+  const [generateResult, setGenerateResult] = useState(null)
+
   const filteredBookings = useMemo(() => {
     if (statusFilter === 'all') return bookings
     return bookings.filter((booking) => booking.status === statusFilter)
@@ -28,6 +40,63 @@ export default function Admin() {
   useEffect(() => {
     if (password) loadBookings(password)
   }, [password])
+
+  function addPatternWindow(day) {
+    const { start, end } = dayDraft[day]
+    if (!start || !end) return
+    if (start >= end) {
+      setGenerateMessage('End time must be after start time.')
+      return
+    }
+
+    setWeeklyPattern((p) => ({
+      ...p,
+      [day]: [...p[day], { startTime: start, endTime: end }].sort((a, b) =>
+        a.startTime.localeCompare(b.startTime)
+      )
+    }))
+    setDayDraft((d) => ({ ...d, [day]: { start: '', end: '' } }))
+    setGenerateMessage('')
+  }
+
+  function removePatternWindow(day, index) {
+    setWeeklyPattern((p) => ({ ...p, [day]: p[day].filter((_, i) => i !== index) }))
+  }
+
+  async function generateWeeklySchedule(e) {
+    e.preventDefault()
+    setGenerateMessage('')
+    setGenerateResult(null)
+
+    const hasAnyWindows = Object.values(weeklyPattern).some((w) => w.length > 0)
+    if (!hasAnyWindows) {
+      setGenerateState('error')
+      setGenerateMessage('Add at least one window to at least one day first.')
+      return
+    }
+
+    setGenerateState('loading')
+
+    try {
+      const res = await fetch('/api/availability-windows/generate-weekly', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-password': password
+        },
+        body: JSON.stringify({ weeksAhead: Number(weeksAhead), pattern: weeklyPattern })
+      })
+      const data = await res.json()
+
+      if (!res.ok) throw new Error(data.error || 'Could not generate the schedule.')
+
+      setGenerateState('done')
+      setGenerateResult(data)
+    } catch (err) {
+      setGenerateState('error')
+      setGenerateMessage(err.message || 'Could not generate the schedule.')
+    }
+  }
 
   async function loadBookings(adminPassword = password) {
     setLoadState('loading')
@@ -152,6 +221,109 @@ export default function Admin() {
       <TickDivider className="max-w-6xl mx-auto" />
 
       <section className="max-w-6xl mx-auto px-6 py-8">
+        <h2 className="font-display font-bold text-xl">Weekly schedule</h2>
+        <p className="text-steel text-sm mt-1 max-w-xl">
+          Build a repeating weekly pattern, then stamp it onto upcoming dates in one
+          go. Re-running this skips any date that already has hours set, so it's
+          safe to use again whenever your pattern changes.
+        </p>
+
+        <div className="mt-6 space-y-4">
+          {DAY_ORDER.map((day) => (
+            <div key={day} className="flex flex-wrap items-center gap-3 border-b border-ink/10 pb-4">
+              <span className="font-display font-semibold text-sm w-24 shrink-0">
+                {DAY_LABELS[day]}
+              </span>
+
+              <div className="flex flex-wrap gap-2">
+                {weeklyPattern[day].map((w, i) => (
+                  <span
+                    key={`${w.startTime}-${w.endTime}-${i}`}
+                    className="flex items-center gap-2 border border-ink/15 px-2.5 py-1.5 font-mono text-xs"
+                  >
+                    {w.startTime} – {w.endTime}
+                    <button
+                      type="button"
+                      onClick={() => removePatternWindow(day, i)}
+                      aria-label={`Remove ${w.startTime} to ${w.endTime} on ${DAY_LABELS[day]}`}
+                      className="text-steel hover:text-ember text-sm leading-none"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-2 md:ml-auto">
+                <input
+                  type="time"
+                  value={dayDraft[day].start}
+                  onChange={(e) =>
+                    setDayDraft((d) => ({ ...d, [day]: { ...d[day], start: e.target.value } }))
+                  }
+                  className="border border-ink/20 bg-chalk px-2 py-1.5 text-xs focus:bg-white"
+                />
+                <span className="text-steel text-xs">to</span>
+                <input
+                  type="time"
+                  value={dayDraft[day].end}
+                  onChange={(e) =>
+                    setDayDraft((d) => ({ ...d, [day]: { ...d[day], end: e.target.value } }))
+                  }
+                  className="border border-ink/20 bg-chalk px-2 py-1.5 text-xs focus:bg-white"
+                />
+                <button
+                  type="button"
+                  onClick={() => addPatternWindow(day)}
+                  className="font-display font-semibold uppercase text-[11px] tracking-wide border border-ink/20 px-3 py-1.5 hover:border-ember hover:text-ember"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <form onSubmit={generateWeeklySchedule} className="mt-6 flex flex-wrap items-end gap-4">
+          <label className="block">
+            <span className="font-mono text-xs uppercase tracking-wide text-steel">Apply for the next</span>
+            <div className="flex items-center gap-2 mt-1">
+              <input
+                type="number"
+                min="1"
+                max="26"
+                value={weeksAhead}
+                onChange={(e) => setWeeksAhead(e.target.value)}
+                className="w-20 border border-ink/20 bg-chalk px-2 py-2 text-sm focus:bg-white"
+              />
+              <span className="text-sm text-steel">weeks</span>
+            </div>
+          </label>
+          <button
+            type="submit"
+            disabled={generateState === 'loading'}
+            className="font-display font-semibold uppercase text-sm tracking-wide bg-ink text-chalk px-6 py-3 hover:bg-ember transition-colors disabled:opacity-60"
+          >
+            {generateState === 'loading' ? 'Generating…' : 'Generate schedule'}
+          </button>
+        </form>
+
+        {generateMessage && (
+          <p role="alert" className="mt-4 font-mono text-xs text-ember">{generateMessage}</p>
+        )}
+        {generateState === 'done' && generateResult && (
+          <p className="mt-4 font-mono text-xs text-moss">
+            Applied to {generateResult.created.length} date{generateResult.created.length === 1 ? '' : 's'}
+            {generateResult.skipped.length > 0
+              ? `, skipped ${generateResult.skipped.length} that already had hours set`
+              : ''}.
+          </p>
+        )}
+      </section>
+
+      <TickDivider className="max-w-6xl mx-auto" />
+
+      <section className="max-w-6xl mx-auto px-6 py-8">
         <div className="flex flex-wrap items-center gap-2">
           {['all', ...STATUSES].map((status) => (
             <button
@@ -227,7 +399,7 @@ export default function Admin() {
                             ))}
                           </div>
                         ) : (
-                          <span className="font-mono text-xs text-steel">No action needed</span>
+                          <span className="font-mono text-xs text-steel">Action Completed </span>
                         )}
                       </td>
                     </tr>

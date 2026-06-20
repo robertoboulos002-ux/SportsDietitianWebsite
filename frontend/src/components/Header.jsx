@@ -24,6 +24,7 @@ export default function Header() {
           <NavLink to="/" end className={navLinkClass}>Home</NavLink>
           <NavLink to="/about" className={navLinkClass}>About</NavLink>
           <NavLink to="/booking" className={navLinkClass}>Booking</NavLink>
+          
           <Link
             to="/booking"
             className="font-display font-semibold text-sm uppercase tracking-wide bg-ink text-chalk px-5 py-2.5 hover:bg-ember transition-colors"

@@ -59,7 +59,7 @@ export default function Footer() {
             Nutrition notes
           </p>
           <p className="text-sm text-chalk/70 mt-2">
-            One email a month: training-fuel tips, no spam.
+            One email a month: training-fuel tips.
           </p>
           <form onSubmit={handleSubscribe} className="mt-4 flex gap-2" noValidate>
             <label htmlFor="footer-email" className="sr-only">Email address</label>

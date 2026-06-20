@@ -5,6 +5,7 @@ require('dotenv').config()
 const bookingsRouter = require('./routes/bookings')
 const newsletterRouter = require('./routes/newsletter')
 const availabilityRouter = require('./routes/availability')
+const availabilityWindowsRouter = require('./routes/availabilityWindows')
 
 const app = express()
 
@@ -16,6 +17,7 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok' }))
 app.use('/api/bookings', bookingsRouter)
 app.use('/api/newsletter', newsletterRouter)
 app.use('/api/availability', availabilityRouter)
+app.use('/api/availability-windows', availabilityWindowsRouter)
 
 // Fallback error handler
 app.use((err, req, res, next) => {

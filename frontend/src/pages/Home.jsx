@@ -19,7 +19,7 @@ const services = [
   },
   {
     title: 'Body Composition Test',
-    duration: '30 min - in-person only',
+    duration: '15 min - in-person only',
     price: '$75',
     description:
       'Skinfold and circumference measurements, tracked over time, so progress is read from data instead of the scale.',
@@ -33,14 +33,14 @@ export default function Home() {
       <section className="max-w-6xl mx-auto px-6 pt-16 pb-12 md:pt-20 md:pb-16">
         <div className="grid md:grid-cols-[300px_1fr] gap-10 md:gap-14 items-start">
           {/* Coach portrait */}
-<div className="w-48 md:w-full mx-auto md:mx-0">
-  <img
-    src="/images/coach-portrait.jpg"
-    alt="Marane Lati, sports dietitian coach"
-    loading="eager"
-    className="block w-full h-auto border border-ink/10"
-  />
-</div>
+          <div className="w-48 md:w-full mx-auto md:mx-0">
+            <img
+              src="/images/coach-portrait.jpg"
+              alt="Marane Lati, sports dietitian coach"
+              loading="eager"
+              className="block w-full h-auto border border-ink/10"
+            />
+          </div>
 
           {/* Headline + copy */}
           <div>
