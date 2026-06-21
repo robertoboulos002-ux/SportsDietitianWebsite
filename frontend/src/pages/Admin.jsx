@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import TickDivider from '../components/TickDivider.jsx'
 
 const ADMIN_PASSWORD_KEY = 'sportDietitianAdminPassword'
+const GENERATED_SCHEDULE_KEY = 'sportDietitianLastGeneratedSchedule'
 const STATUSES = ['pending', 'confirmed', 'cancelled']
 const TYPE_LABELS = {
   consultation: 'Nutrition Consultation',
@@ -17,25 +18,52 @@ const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0]
 const emptyPattern = () => Object.fromEntries(DAY_ORDER.map((d) => [d, []]))
 const emptyDrafts = () => Object.fromEntries(DAY_ORDER.map((d) => [d, { start: '', end: '' }]))
 
+// Reads the last-generated schedule snapshot from this browser's local
+// storage, if any — this is what makes the confirmation table below survive
+// navigating away from /admin, refreshing, and even fully closing the
+// browser, without needing a database round-trip.
+function loadSavedSchedule() {
+  try {
+    const raw = localStorage.getItem(GENERATED_SCHEDULE_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
 export default function Admin() {
   const [password, setPassword] = useState(() => sessionStorage.getItem(ADMIN_PASSWORD_KEY) || '')
   const [passwordInput, setPasswordInput] = useState('')
   const [bookings, setBookings] = useState([])
   const [statusFilter, setStatusFilter] = useState('all')
+  const [searchQuery, setSearchQuery] = useState('')
   const [loadState, setLoadState] = useState('idle')
   const [message, setMessage] = useState('')
 
   const [weeklyPattern, setWeeklyPattern] = useState(emptyPattern)
   const [dayDraft, setDayDraft] = useState(emptyDrafts)
   const [weeksAhead, setWeeksAhead] = useState(8)
-  const [generateState, setGenerateState] = useState('idle') // idle | loading | done | error
+  const [generateState, setGenerateState] = useState(() => (loadSavedSchedule() ? 'done' : 'idle'))
   const [generateMessage, setGenerateMessage] = useState('')
-  const [generateResult, setGenerateResult] = useState(null)
+  const [generateResult, setGenerateResult] = useState(() => loadSavedSchedule()?.result ?? null)
+  const [lastGeneratedPattern, setLastGeneratedPattern] = useState(
+    () => loadSavedSchedule()?.pattern ?? emptyPattern()
+  )
 
   const filteredBookings = useMemo(() => {
-    if (statusFilter === 'all') return bookings
-    return bookings.filter((booking) => booking.status === statusFilter)
-  }, [bookings, statusFilter])
+    let result = statusFilter === 'all' ? bookings : bookings.filter((b) => b.status === statusFilter)
+
+    const q = searchQuery.trim().toLowerCase()
+    if (q) {
+      result = result.filter((b) =>
+        b.name?.toLowerCase().includes(q) ||
+        b.email?.toLowerCase().includes(q) ||
+        b.phone?.toLowerCase().includes(q)
+      )
+    }
+
+    return result
+  }, [bookings, statusFilter, searchQuery])
 
   useEffect(() => {
     if (password) loadBookings(password)
@@ -92,6 +120,17 @@ export default function Admin() {
 
       setGenerateState('done')
       setGenerateResult(data)
+      setLastGeneratedPattern(weeklyPattern)
+      try {
+        localStorage.setItem(
+          GENERATED_SCHEDULE_KEY,
+          JSON.stringify({ pattern: weeklyPattern, result: data })
+        )
+      } catch {
+        // Local storage can fail in private-browsing edge cases — the
+        // schedule still generated successfully either way, so this is
+        // non-fatal; it just won't survive closing the browser this time.
+      }
     } catch (err) {
       setGenerateState('error')
       setGenerateMessage(err.message || 'Could not generate the schedule.')
@@ -312,32 +351,66 @@ export default function Admin() {
           <p role="alert" className="mt-4 font-mono text-xs text-ember">{generateMessage}</p>
         )}
         {generateState === 'done' && generateResult && (
-          <p className="mt-4 font-mono text-xs text-moss">
-            Applied to {generateResult.created.length} date{generateResult.created.length === 1 ? '' : 's'}
-            {generateResult.skipped.length > 0
-              ? `, skipped ${generateResult.skipped.length} that already had hours set`
-              : ''}.
-          </p>
+          <div className="mt-6">
+            <p className="font-mono text-xs text-moss">
+              Applied to {generateResult.created.length} date{generateResult.created.length === 1 ? '' : 's'}
+              {generateResult.skipped.length > 0
+                ? `, skipped ${generateResult.skipped.length} that already had hours set`
+                : ''}.
+            </p>
+
+            <div className="mt-4 overflow-x-auto border border-ink/10">
+              <table className="min-w-full text-sm">
+                <thead className="bg-moss/5 text-left font-display uppercase tracking-wide text-xs">
+                  <tr>
+                    <th className="px-4 py-3">Day</th>
+                    <th className="px-4 py-3">Hours</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {DAY_ORDER.filter((day) => lastGeneratedPattern[day]?.length > 0).map((day) => (
+                    <tr key={day} className="border-t border-ink/10">
+                      <td className="px-4 py-3 font-display font-semibold">{DAY_LABELS[day]}</td>
+                      <td className="px-4 py-3 font-mono text-xs">
+                        {lastGeneratedPattern[day].map((w) => `${w.startTime}–${w.endTime}`).join(', ')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
       </section>
 
       <TickDivider className="max-w-6xl mx-auto" />
 
       <section className="max-w-6xl mx-auto px-6 py-8">
-        <div className="flex flex-wrap items-center gap-2">
-          {['all', ...STATUSES].map((status) => (
-            <button
-              key={status}
-              onClick={() => setStatusFilter(status)}
-              className={`font-display font-semibold uppercase text-xs tracking-wide border px-4 py-2 transition-colors ${
-                statusFilter === status
-                  ? 'border-ember bg-ember/5 text-ember'
-                  : 'border-ink/20 hover:border-ink/50'
-              }`}
-            >
-              {status}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {['all', ...STATUSES].map((status) => (
+              <button
+                key={status}
+                onClick={() => setStatusFilter(status)}
+                className={`font-display font-semibold uppercase text-xs tracking-wide border px-4 py-2 transition-colors ${
+                  statusFilter === status
+                    ? 'border-ember bg-ember/5 text-ember'
+                    : 'border-ink/20 hover:border-ink/50'
+                }`}
+              >
+                {status}
+              </button>
+            ))}
+          </div>
+
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search name, email, or phone…"
+            aria-label="Search bookings"
+            className="w-full md:w-64 md:ml-auto border border-ink/20 bg-chalk px-3.5 py-2 text-sm focus:bg-white"
+          />
         </div>
 
         {message && <p role="alert" className="mt-5 font-mono text-xs text-ember">{message}</p>}

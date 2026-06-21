@@ -138,22 +138,39 @@ router.post('/generate-weekly', requireAdmin, async (req, res) => {
 
       const dateStr = date.toISOString().split('T')[0]
 
-      const [existing] = await pool.execute(
-        `SELECT id FROM availability_windows WHERE date = ? LIMIT 1`,
+      const [existingRows] = await pool.execute(
+        `SELECT start_time, end_time FROM availability_windows WHERE date = ?`,
         [dateStr]
       )
-      if (existing.length > 0) {
-        skipped.push(dateStr)
-        continue
-      }
+      const existingWindows = existingRows.map((r) => ({
+        startTime: String(r.start_time).slice(0, 5),
+        endTime: String(r.end_time).slice(0, 5)
+      }))
 
+      let addedAny = false
       for (const w of windowsForDay) {
+        // Skip only this specific window if it overlaps one already saved
+        // for this date — NOT the whole date. That's what lets a new
+        // window get added to a day that already has one from before.
+        const alreadyCovered = existingWindows.some(
+          (ew) =>
+            toMinutes(w.startTime) < toMinutes(ew.endTime) &&
+            toMinutes(ew.startTime) < toMinutes(w.endTime)
+        )
+        if (alreadyCovered) continue
+
         await pool.execute(
           `INSERT INTO availability_windows (date, start_time, end_time) VALUES (?, ?, ?)`,
           [dateStr, w.startTime, w.endTime]
         )
+        addedAny = true
       }
-      created.push(dateStr)
+
+      if (addedAny) {
+        created.push(dateStr)
+      } else if (existingWindows.length > 0) {
+        skipped.push(dateStr)
+      }
     }
 
     res.json({ created, skipped })
