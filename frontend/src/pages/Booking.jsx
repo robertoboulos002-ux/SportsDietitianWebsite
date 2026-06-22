@@ -82,47 +82,86 @@ export default function Booking() {
     return next
   }
 
-  async function handleSubmit(e) {
-    e.preventDefault()
-    const validation = validate()
-    setErrors(validation)
-    if (Object.keys(validation).length > 0) return
+  // async function handleSubmit(e) {
+  //   e.preventDefault()
+  //   const validation = validate()
+  //   setErrors(validation)
+  //   if (Object.keys(validation).length > 0) return
 
-    setStatus('loading')
-    setServerMessage('')
-    try {
-      const res = await fetch('/api/bookings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form)
-      })
-      const data = await res.json()
+  //   setStatus('loading')
+  //   setServerMessage('')
+  //   try {
+  //     const res = await fetch('/api/bookings', {
+  //       method: 'POST',
+  //       headers: { 'Content-Type': 'application/json' },
+  //       body: JSON.stringify(form)
+  //     })
+  //     const data = await res.json()
 
-      if (res.status === 409) {
-        // Someone else took the slot between page load and submit — drop it
-        // from the local list so the dropdown reflects reality.
-        setAvailableSlots((prev) => prev.filter((t) => t !== form.preferredTime))
-        setForm((f) => ({ ...f, preferredTime: '' }))
-        throw new Error(data.error || 'That slot was just taken. Please pick another time.')
-      }
-      if (!res.ok) throw new Error(data.error || 'Could not submit booking.')
+  //     if (res.status === 409) {
+  //       // Someone else took the slot between page load and submit — drop it
+  //       // from the local list so the dropdown reflects reality.
+  //       setAvailableSlots((prev) => prev.filter((t) => t !== form.preferredTime))
+  //       setForm((f) => ({ ...f, preferredTime: '' }))
+  //       throw new Error(data.error || 'That slot was just taken. Please pick another time.')
+  //     }
+  //     if (!res.ok) throw new Error(data.error || 'Could not submit booking.')
 
-      setStatus('success')
-      setForm({
-        name: '',
-        email: '',
-        phone: '',
-        appointmentType: APPOINTMENT_TYPES[0].value,
-        preferredDate: '',
-        preferredTime: '',
-        notes: ''
-      })
-    } catch (err) {
-      setStatus('error')
-      setServerMessage(err.message || 'Something went wrong. Please try again.')
+  //     setStatus('success')
+  //     setForm({
+  //       name: '',
+  //       email: '',
+  //       phone: '',
+  //       appointmentType: APPOINTMENT_TYPES[0].value,
+  //       preferredDate: '',
+  //       preferredTime: '',
+  //       notes: ''
+  //     })
+  //   } catch (err) {
+  //     setStatus('error')
+  //     setServerMessage(err.message || 'Something went wrong. Please try again.')
+  //   }
+  // }
+async function handleSubmit(e) {
+  e.preventDefault()
+  const validation = validate()
+  setErrors(validation)
+  if (Object.keys(validation).length > 0) return
+
+  setStatus('loading')
+  setServerMessage('')
+
+  // If still waiting after 5 seconds, Render is likely waking up
+  const wakingTimer = setTimeout(() => setStatus('waking'), 5000)
+
+  try {
+    const res = await fetch('/api/bookings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(form)
+    })
+    clearTimeout(wakingTimer)
+    const data = await res.json()
+
+    if (res.status === 409) {
+      setAvailableSlots((prev) => prev.filter((t) => t !== form.preferredTime))
+      setForm((f) => ({ ...f, preferredTime: '' }))
+      throw new Error(data.error || 'That slot was just taken. Please pick another time.')
     }
-  }
+    if (!res.ok) throw new Error(data.error || 'Could not submit booking.')
 
+    setStatus('success')
+    setForm({
+      name: '', email: '', phone: '',
+      appointmentType: APPOINTMENT_TYPES[0].value,
+      preferredDate: '', preferredTime: '', notes: ''
+    })
+  } catch (err) {
+    clearTimeout(wakingTimer)
+    setStatus('error')
+    setServerMessage(err.message || 'Something went wrong. Please try again.')
+  }
+}
   if (status === 'success') {
     return (
       <section className="max-w-2xl mx-auto px-6 py-24 text-center">
@@ -167,11 +206,10 @@ export default function Booking() {
               {APPOINTMENT_TYPES.map((t) => (
                 <label
                   key={t.value}
-                  className={`block border px-4 py-3.5 cursor-pointer text-sm transition-colors ${
-                    form.appointmentType === t.value
-                      ? 'border-ember bg-ember/5'
-                      : 'border-ink/15 hover:border-ink/40'
-                  }`}
+                  className={`block border px-4 py-3.5 cursor-pointer text-sm transition-colors ${form.appointmentType === t.value
+                    ? 'border-ember bg-ember/5'
+                    : 'border-ink/15 hover:border-ink/40'
+                    }`}
                 >
                   <input
                     type="radio"
@@ -271,16 +309,19 @@ export default function Booking() {
             />
           </Field>
 
-          {status === 'error' && (
-            <p role="alert" className="text-sm font-mono text-ember">{serverMessage}</p>
+          {status === 'waking' && (
+            <p className="text-sm font-mono text-steel animate-pulse">
+              Server is waking up — this can take up to 60 seconds on first request. Please wait…
+            </p>
           )}
+
 
           <button
             type="submit"
-            disabled={status === 'loading'}
+            disabled={status === 'loading' || status === 'waking'}
             className="font-display font-semibold uppercase text-sm tracking-wide bg-ink text-chalk px-7 py-3.5 hover:bg-ember transition-colors disabled:opacity-60"
           >
-            {status === 'loading' ? 'Submitting…' : 'Submit Booking Request'}
+            {status === 'loading' || status === 'waking' ? 'Submitting…' : 'Submit booking'}
           </button>
         </form>
       </section>
@@ -299,7 +340,6 @@ function Field({ label, error, children }) {
 }
 
 function inputClass(error) {
-  return `w-full border px-3.5 py-2.5 text-sm bg-chalk focus:bg-white transition-colors ${
-    error ? 'border-ember' : 'border-ink/20'
-  }`
+  return `w-full border px-3.5 py-2.5 text-sm bg-chalk focus:bg-white transition-colors ${error ? 'border-ember' : 'border-ink/20'
+    }`
 }
