@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import TickDivider from '../components/TickDivider.jsx'
+import API_BASE from '../config.js'
 
 const ADMIN_PASSWORD_KEY = 'sportDietitianAdminPassword'
 const GENERATED_SCHEDULE_KEY = 'sportDietitianLastGeneratedSchedule'
@@ -107,7 +108,7 @@ export default function Admin() {
     setGenerateState('loading')
 
     try {
-      const res = await fetch('/api/availability-windows/generate-weekly', {
+      const res = await fetch(`${API_BASE}/api/availability-windows/generate-weekly`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -171,7 +172,7 @@ export default function Admin() {
     setMessage('')
 
     try {
-      const res = await fetch('/api/bookings', {
+      const res = await fetch(`${API_BASE}/api/bookings`, {
         headers: { 'x-admin-password': adminPassword }
       })
       const data = await res.json()
@@ -212,7 +213,7 @@ export default function Admin() {
     setMessage('')
 
     try {
-      const res = await fetch(`/api/bookings/${id}`, {
+      const res = await fetch(`${API_BASE}/api/bookings/${id}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

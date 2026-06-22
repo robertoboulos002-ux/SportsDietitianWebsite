@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import API_BASE from '../config.js'
 
 const INSTAGRAM_URL = 'https://www.instagram.com/maranelati'
 
@@ -12,7 +13,7 @@ export default function Footer() {
     setStatus('loading')
     setMessage('')
     try {
-      const res = await fetch('/api/newsletter', {
+      const res = await fetch(`${API_BASE}/api/newsletter`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email })
