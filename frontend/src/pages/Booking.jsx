@@ -168,11 +168,10 @@ export default function Booking() {
               {APPOINTMENT_TYPES.map((t) => (
                 <label
                   key={t.value}
-                  className={`block border px-4 py-3.5 cursor-pointer text-sm transition-colors ${
-                    form.appointmentType === t.value
+                  className={`block border px-4 py-3.5 cursor-pointer text-sm transition-colors ${form.appointmentType === t.value
                       ? 'border-ember bg-ember/5'
                       : 'border-ink/15 hover:border-ink/40'
-                  }`}
+                    }`}
                 >
                   <input
                     type="radio"
@@ -283,6 +282,13 @@ export default function Booking() {
           >
             {status === 'loading' ? 'Submitting…' : 'Submit Booking Request'}
           </button>
+
+          {status === 'loading' && (
+            <p className="mt-3 text-sm font-mono text-steel">
+              Your request is being processed. It may take up to 30–60 seconds to confirm submission.
+              A confirmation email will be sent to your inbox once completed.
+            </p>
+          )}
         </form>
       </section>
     </div>
@@ -300,7 +306,6 @@ function Field({ label, error, children }) {
 }
 
 function inputClass(error) {
-  return `w-full border px-3.5 py-2.5 text-sm bg-chalk focus:bg-white transition-colors ${
-    error ? 'border-ember' : 'border-ink/20'
-  }`
+  return `w-full border px-3.5 py-2.5 text-sm bg-chalk focus:bg-white transition-colors ${error ? 'border-ember' : 'border-ink/20'
+    }`
 }
