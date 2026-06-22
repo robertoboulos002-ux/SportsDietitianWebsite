@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import * as XLSX from 'xlsx'
 import TickDivider from '../components/TickDivider.jsx'
 
 const ADMIN_PASSWORD_KEY = 'sportDietitianAdminPassword'
@@ -135,6 +136,34 @@ export default function Admin() {
       setGenerateState('error')
       setGenerateMessage(err.message || 'Could not generate the schedule.')
     }
+  }
+
+  function exportToExcel() {
+    const rows = filteredBookings.map((b) => ({
+      'Name':             b.name,
+      'Email':            b.email,
+      'Phone':            b.phone,
+      'Session':          TYPE_LABELS[b.appointment_type] || b.appointment_type,
+      'Price':            TYPE_PRICES[b.appointment_type] || '',
+      'Date':             formatDate(b.preferred_date),
+      'Time':             formatTime(b.preferred_time),
+      'Status':           b.status,
+      'Notes':            b.notes || '',
+      'Booked at':        b.created_at ? new Date(b.created_at).toLocaleString() : ''
+    }))
+
+    const worksheet = XLSX.utils.json_to_sheet(rows)
+    const workbook  = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Bookings')
+
+    // Auto-size columns based on content
+    const colWidths = Object.keys(rows[0] || {}).map((key) => ({
+      wch: Math.max(key.length, ...rows.map((r) => String(r[key] || '').length)) + 2
+    }))
+    worksheet['!cols'] = colWidths
+
+    const filename = `bookings-${new Date().toISOString().split('T')[0]}.xlsx`
+    XLSX.writeFile(workbook, filename)
   }
 
   async function loadBookings(adminPassword = password) {
@@ -411,6 +440,20 @@ export default function Admin() {
             aria-label="Search bookings"
             className="w-full md:w-64 md:ml-auto border border-ink/20 bg-chalk px-3.5 py-2 text-sm focus:bg-white"
           />
+
+          {filteredBookings.length > 0 && (
+            <button
+              onClick={exportToExcel}
+              className="font-display font-semibold uppercase text-xs tracking-wide border border-ink/20 px-4 py-2 hover:border-moss hover:text-moss transition-colors flex items-center gap-2"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              Export Excel
+            </button>
+          )}
         </div>
 
         {message && <p role="alert" className="mt-5 font-mono text-xs text-ember">{message}</p>}
@@ -472,7 +515,7 @@ export default function Admin() {
                             ))}
                           </div>
                         ) : (
-                          <span className="font-mono text-xs text-steel">Action Completed </span>
+                          <span className="font-mono text-xs text-steel">No action needed</span>
                         )}
                       </td>
                     </tr>
