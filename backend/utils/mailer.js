@@ -1,15 +1,23 @@
-const nodemailer = require('nodemailer')
+// Uses Resend (https://resend.com) instead of Gmail SMTP because Render's
+// free tier blocks outbound SMTP ports (465/587). Resend sends over HTTPS
+// (port 443) which Render never blocks.
+const { Resend } = require('resend')
 require('dotenv').config()
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_APP_PASSWORD
-  }
-})
+const resend = new Resend(process.env.RESEND_API_KEY)
 
 const notifyAddress = process.env.NOTIFY_EMAIL || process.env.GMAIL_USER
+const businessName  = process.env.BUSINESS_NAME || 'Sports Dietitian Coach'
+const coachName     = process.env.COACH_NAME || ''
+const fromAddress   = process.env.RESEND_FROM || 'onboarding@resend.dev'
+
+function isEmailConfigured() {
+  if (!process.env.RESEND_API_KEY) {
+    console.warn('Email not configured (RESEND_API_KEY missing) — skipping email.')
+    return false
+  }
+  return true
+}
 
 function bookingLines(booking) {
   const typeLabel = booking.appointmentType === 'body-composition'
@@ -31,7 +39,7 @@ function bookingLines(booking) {
       `Phone: ${booking.phone}`,
       booking.notes ? `Notes: ${booking.notes}` : null,
       '',
-      'Status: pending - confirm or cancel it from the admin dashboard.'
+      'Status: pending — confirm or cancel from the admin dashboard.'
     ].filter(Boolean)
   }
 }
@@ -41,21 +49,7 @@ async function sendBookingNotification(booking) {
     sendAdminBookingEmail(booking),
     sendWhatsappNotification(booking)
   ])
-
-  results.forEach((result) => {
-    if (result.status === 'rejected') {
-      console.error(result.reason)
-    }
-  })
-}
-
-function isEmailConfigured() {
-  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-    console.warn('Email not configured (GMAIL_USER / GMAIL_APP_PASSWORD missing) - skipping notification email.')
-    return false
-  }
-
-  return true
+  results.forEach((r) => { if (r.status === 'rejected') console.error(r.reason) })
 }
 
 async function sendAdminBookingEmail(booking) {
@@ -63,11 +57,11 @@ async function sendAdminBookingEmail(booking) {
 
   const { typeLabel, lines } = bookingLines(booking)
 
-  await transporter.sendMail({
-    from: `"Booking system" <${process.env.GMAIL_USER}>`,
+  await resend.emails.send({
+    from: fromAddress,
     to: notifyAddress,
-    replyTo: `"${booking.name}" <${booking.email}>`,
-    subject: `New booking: ${typeLabel} - ${booking.preferredDate} ${booking.preferredTime}`,
+    reply_to: `${booking.name} <${booking.email}>`,
+    subject: `New booking: ${typeLabel} — ${booking.preferredDate} ${booking.preferredTime}`,
     text: lines.join('\n')
   })
 }
@@ -76,18 +70,15 @@ async function sendClientStatusEmail(booking) {
   if (!isEmailConfigured()) return
 
   const { typeLabel } = bookingLines(booking)
-  const businessName = process.env.BUSINESS_NAME || 'Sports Dietitian Coach'
-  const coachName = process.env.COACH_NAME
-  const signature = coachName ? `${coachName}\n${businessName}` : businessName
-  const replyTo = process.env.NOTIFY_EMAIL || process.env.GMAIL_USER
+  const signature   = coachName ? `${coachName}\n${businessName}` : businessName
   const isConfirmed = booking.status === 'confirmed'
-  const statusText = isConfirmed ? 'confirmed' : 'cancelled'
+  const statusText  = isConfirmed ? 'confirmed' : 'cancelled'
 
-  await transporter.sendMail({
-    from: `"${businessName}" <${process.env.GMAIL_USER}>`,
+  await resend.emails.send({
+    from: fromAddress,
     to: booking.email,
-    replyTo,
-    subject: `Your booking has been ${statusText} - ${typeLabel}`,
+    reply_to: notifyAddress,
+    subject: `Your booking has been ${statusText} — ${typeLabel}`,
     text: [
       `Hi ${booking.name},`,
       '',
@@ -104,7 +95,7 @@ async function sendClientStatusEmail(booking) {
         ? 'We look forward to seeing you.'
         : 'Please contact us if you would like to choose another time.',
       '',
-      `Thank you,`,
+      'Thank you,',
       signature
     ].filter(Boolean).join('\n')
   })
@@ -112,29 +103,26 @@ async function sendClientStatusEmail(booking) {
 
 async function sendWhatsappNotification(booking) {
   const { WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_TO } = process.env
-  if (!WHATSAPP_ACCESS_TOKEN || !WHATSAPP_PHONE_NUMBER_ID || !WHATSAPP_TO) {
-    return
-  }
+  if (!WHATSAPP_ACCESS_TOKEN || !WHATSAPP_PHONE_NUMBER_ID || !WHATSAPP_TO) return
   if (typeof fetch !== 'function') {
     console.warn('WhatsApp notification requires Node 18+ fetch support.')
     return
   }
 
   const { lines } = bookingLines(booking)
-  const response = await fetch(`https://graph.facebook.com/v19.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      messaging_product: 'whatsapp',
-      to: WHATSAPP_TO,
-      type: 'text',
-      text: { preview_url: false, body: lines.join('\n') }
-    })
-  })
-
+  const response = await fetch(
+    `https://graph.facebook.com/v19.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to: WHATSAPP_TO,
+        type: 'text',
+        text: { preview_url: false, body: lines.join('\n') }
+      })
+    }
+  )
   if (!response.ok) {
     const details = await response.text()
     throw new Error(`WhatsApp notification failed: ${response.status} ${details}`)
