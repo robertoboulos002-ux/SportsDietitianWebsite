@@ -1,22 +1,45 @@
-// Uses Resend (https://resend.com) instead of Gmail SMTP because Render's
-// free tier blocks outbound SMTP ports (465/587). Resend sends over HTTPS
-// (port 443) which Render never blocks.
-const { Resend } = require('resend')
+// Uses Brevo (https://brevo.com) API — sends over HTTPS port 443 so it
+// works on Render's free tier, and unlike Resend's free plan it can
+// deliver to ANY recipient email address without domain verification.
 require('dotenv').config()
 
-const resend = new Resend(process.env.RESEND_API_KEY)
+const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email'
 
 const notifyAddress = process.env.NOTIFY_EMAIL || process.env.GMAIL_USER
 const businessName  = process.env.BUSINESS_NAME || 'Sports Dietitian Coach'
 const coachName     = process.env.COACH_NAME || ''
-const fromAddress   = process.env.RESEND_FROM || 'onboarding@resend.dev'
+const fromEmail     = process.env.BREVO_FROM_EMAIL || process.env.GMAIL_USER
+const fromName      = process.env.BREVO_FROM_NAME  || businessName
 
 function isEmailConfigured() {
-  if (!process.env.RESEND_API_KEY) {
-    console.warn('Email not configured (RESEND_API_KEY missing) — skipping email.')
+  if (!process.env.BREVO_API_KEY) {
+    console.warn('Email not configured (BREVO_API_KEY missing) — skipping email.')
     return false
   }
   return true
+}
+
+async function sendEmail({ to, replyTo, subject, text }) {
+  const res = await fetch(BREVO_API_URL, {
+    method: 'POST',
+    headers: {
+      'accept':       'application/json',
+      'api-key':      process.env.BREVO_API_KEY,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      sender:      { name: fromName, email: fromEmail },
+      to:          [{ email: to }],
+      replyTo:     replyTo ? { email: replyTo } : undefined,
+      subject,
+      textContent: text
+    })
+  })
+
+  if (!res.ok) {
+    const details = await res.text()
+    throw new Error(`Brevo API error ${res.status}: ${details}`)
+  }
 }
 
 function bookingLines(booking) {
@@ -57,12 +80,11 @@ async function sendAdminBookingEmail(booking) {
 
   const { typeLabel, lines } = bookingLines(booking)
 
-  await resend.emails.send({
-    from: fromAddress,
-    to: notifyAddress,
-    reply_to: `${booking.name} <${booking.email}>`,
+  await sendEmail({
+    to:      notifyAddress,
+    replyTo: booking.email,
     subject: `New booking: ${typeLabel} — ${booking.preferredDate} ${booking.preferredTime}`,
-    text: lines.join('\n')
+    text:    lines.join('\n')
   })
 }
 
@@ -74,10 +96,9 @@ async function sendClientStatusEmail(booking) {
   const isConfirmed = booking.status === 'confirmed'
   const statusText  = isConfirmed ? 'confirmed' : 'cancelled'
 
-  await resend.emails.send({
-    from: fromAddress,
-    to: booking.email,
-    reply_to: notifyAddress,
+  await sendEmail({
+    to:      booking.email,
+    replyTo: notifyAddress,
     subject: `Your booking has been ${statusText} — ${typeLabel}`,
     text: [
       `Hi ${booking.name},`,
@@ -114,10 +135,13 @@ async function sendWhatsappNotification(booking) {
     `https://graph.facebook.com/v19.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`,
     {
       method: 'POST',
-      headers: { Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
+      headers: {
+        Authorization:  `Bearer ${WHATSAPP_ACCESS_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
       body: JSON.stringify({
         messaging_product: 'whatsapp',
-        to: WHATSAPP_TO,
+        to:   WHATSAPP_TO,
         type: 'text',
         text: { preview_url: false, body: lines.join('\n') }
       })

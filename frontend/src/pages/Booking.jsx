@@ -286,7 +286,7 @@ export default function Booking() {
           {status === 'loading' && (
             <p className="mt-3 text-sm font-mono text-steel">
               Your request is being processed. It may take up to 30–60 seconds to confirm submission.
-              A confirmation email will be sent to your inbox once completed.
+              
             </p>
           )}
         </form>
