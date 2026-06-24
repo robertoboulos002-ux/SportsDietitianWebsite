@@ -75,9 +75,9 @@ router.post('/', async (req, res) => {
     }
 
     const [result] = await pool.execute(
-      `INSERT INTO bookings (name, email, phone, appointment_type, preferred_date, preferred_time, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [name.trim(), email.trim(), phone.trim(), appointmentType, preferredDate, preferredTime, notes || null]
+      `INSERT INTO bookings (name, email, phone, appointment_type, preferred_date, preferred_time, notes, price)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [name.trim(), email.trim(), phone.trim(), appointmentType, preferredDate, preferredTime, notes || null, APPOINTMENT_PRICES[appointmentType]]
     )
 
     // Email failures shouldn't fail the booking itself — the row is already
@@ -113,7 +113,7 @@ router.post('/', async (req, res) => {
 router.get('/', requireAdmin, async (req, res) => {
   try {
     const [rows] = await pool.execute(
-      `SELECT id, name, email, phone, appointment_type, preferred_date, preferred_time, notes, status, created_at
+      `SELECT id, name, email, phone, appointment_type, preferred_date, preferred_time, notes, status, price, created_at
        FROM bookings ORDER BY created_at DESC, id DESC`
     )
     res.json(rows)
@@ -123,29 +123,37 @@ router.get('/', requireAdmin, async (req, res) => {
   }
 })
 
-// PATCH /api/bookings/:id - update a booking status from the admin dashboard.
+// PATCH /api/bookings/:id - update a booking status (and optionally price) from the admin dashboard.
 router.patch('/:id', requireAdmin, async (req, res) => {
   const id = Number(req.params.id)
-  const { status } = req.body || {}
+  const { status, price } = req.body || {}
 
   if (!Number.isInteger(id) || id <= 0) {
     return res.status(400).json({ error: 'Invalid booking id.' })
   }
-  if (!VALID_STATUSES.includes(status)) {
+  if (status && !VALID_STATUSES.includes(status)) {
     return res.status(400).json({ error: 'Invalid booking status.' })
   }
 
   try {
+    // Build update dynamically — status only, price only, or both
+    const fields = []
+    const values = []
+    if (status) { fields.push('status = ?'); values.push(status) }
+    if (price !== undefined) { fields.push('price = ?'); values.push(price || null) }
+    if (fields.length === 0) return res.status(400).json({ error: 'Nothing to update.' })
+    values.push(id)
+
     const [result] = await pool.execute(
-      `UPDATE bookings SET status = ? WHERE id = ?`,
-      [status, id]
+      `UPDATE bookings SET ${fields.join(', ')} WHERE id = ?`,
+      values
     )
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'Booking not found.' })
     }
 
     const [rows] = await pool.execute(
-      `SELECT id, name, email, phone, appointment_type, preferred_date, preferred_time, notes, status, created_at
+      `SELECT id, name, email, phone, appointment_type, preferred_date, preferred_time, notes, status, price, created_at
        FROM bookings WHERE id = ?`,
       [id]
     )
@@ -162,7 +170,7 @@ router.patch('/:id', requireAdmin, async (req, res) => {
           preferredTime: String(booking.preferred_time).slice(0, 5),
           notes: booking.notes,
           status: booking.status,
-          price: APPOINTMENT_PRICES[booking.appointment_type]
+          price: booking.price || APPOINTMENT_PRICES[booking.appointment_type]
         })
       } catch (mailErr) {
         console.error('Booking updated, but client status email failed:', mailErr)

@@ -52,6 +52,33 @@ export default function Admin() {
     () => loadSavedSchedule()?.pattern ?? emptyPattern()
   )
 
+  const [editingPrice, setEditingPrice] = useState(null) // { id, value }
+
+  function getPrice(booking) {
+    return booking.price || TYPE_PRICES[booking.appointment_type] || ''
+  }
+
+  async function savePrice(id) {
+    if (!editingPrice || editingPrice.id !== id) return
+    const val = editingPrice.value.trim()
+    setEditingPrice(null)
+
+    try {
+      const res = await fetch(`${API_BASE}/api/bookings/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
+        body: JSON.stringify({ price: val })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Could not update price.')
+
+      // Update the booking in local state so the table reflects the new price
+      setBookings((prev) => prev.map((b) => b.id === id ? { ...b, price: data.price } : b))
+    } catch (err) {
+      console.error('Price update failed:', err.message)
+    }
+  }
+
   const filteredBookings = useMemo(() => {
     let result = statusFilter === 'all' ? bookings : bookings.filter((b) => b.status === statusFilter)
 
@@ -145,7 +172,7 @@ export default function Admin() {
       'Email':            b.email,
       'Phone':            b.phone,
       'Session':          TYPE_LABELS[b.appointment_type] || b.appointment_type,
-      'Price':            TYPE_PRICES[b.appointment_type] || '',
+      'Price':            b.price || TYPE_PRICES[b.appointment_type] || '',
       'Date':             formatDate(b.preferred_date),
       'Time':             formatTime(b.preferred_time),
       'Status':           b.status,
@@ -472,6 +499,7 @@ export default function Admin() {
                 <tr>
                   <th className="px-4 py-3">Client</th>
                   <th className="px-4 py-3">Session</th>
+                  <th className="px-4 py-3">Price</th>
                   <th className="px-4 py-3">Date</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Actions</th>
@@ -491,7 +519,33 @@ export default function Admin() {
                       </td>
                       <td className="px-4 py-4">
                         <p>{TYPE_LABELS[booking.appointment_type] || booking.appointment_type}</p>
-                        <p className="mt-1 font-mono text-xs text-ember">{TYPE_PRICES[booking.appointment_type]}</p>
+                      </td>
+                      <td className="px-4 py-4">
+                        {editingPrice?.id === booking.id ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              autoFocus
+                              type="text"
+                              value={editingPrice.value}
+                              onChange={(e) => setEditingPrice({ id: booking.id, value: e.target.value })}
+                              onBlur={() => savePrice(booking.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') savePrice(booking.id)
+                                if (e.key === 'Escape') setEditingPrice(null)
+                              }}
+                              className="w-20 border border-ember px-2 py-1 font-mono text-xs focus:bg-white"
+                            />
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setEditingPrice({ id: booking.id, value: getPrice(booking) })}
+                            title="Click to edit price"
+                            className="font-mono text-xs text-ember hover:underline cursor-pointer text-left"
+                          >
+                            {getPrice(booking)}
+                            <span className="ml-1 text-steel text-[10px]">✎</span>
+                          </button>
+                        )}
                       </td>
                       <td className="px-4 py-4 font-mono text-xs">
                         <p>{formatDate(booking.preferred_date)}</p>
